@@ -43,7 +43,7 @@ The OpenAI Codex provider authenticates via device code (open a URL, enter a cod
 :::
 
 :::warning
-Even when using Nous Portal, Codex, or a custom endpoint, some tools (vision, web summarization, MoA) use a separate "auxiliary" model — by default Gemini Flash via OpenRouter. An `OPENROUTER_API_KEY` enables these tools automatically. You can also configure which model and provider these tools use — see [Auxiliary Models](/docs/user-guide/configuration#auxiliary-models).
+Some side tasks (vision, web summarization, browser screenshot analysis, compression) can use an auxiliary model. In `auto` mode Hermes now tries your active main model/provider first when it already supports the task, so you don't pay for a separate fallback unnecessarily. If your current model can't handle the task, Hermes falls back through its auxiliary chain (for example Gemini Flash via OpenRouter when `OPENROUTER_API_KEY` is configured). You can also configure which model and provider these tools use — see [Auxiliary Models](/docs/user-guide/configuration#auxiliary-models).
 :::
 
 ### Anthropic (Native)

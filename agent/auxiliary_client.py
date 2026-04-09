@@ -5,14 +5,16 @@ session search, web extraction, vision analysis, browser vision) picks up
 the best available backend without duplicating fallback logic.
 
 Resolution order for text tasks (auto mode):
-  1. OpenRouter  (OPENROUTER_API_KEY)
-  2. Nous Portal (~/.hermes/auth.json active provider)
-  3. Custom endpoint (config.yaml model.base_url + OPENAI_API_KEY)
-  4. Codex OAuth (Responses API via chatgpt.com with gpt-5.3-codex,
+  1. Selected main provider + model, when the main provider is a non-aggregator
+     (Codex, Anthropic, direct API-key providers, named custom endpoints, etc.)
+  2. OpenRouter  (OPENROUTER_API_KEY)
+  3. Nous Portal (~/.hermes/auth.json active provider)
+  4. Custom endpoint (config.yaml model.base_url + OPENAI_API_KEY)
+  5. Codex OAuth (Responses API via chatgpt.com with gpt-5.3-codex,
      wrapped to look like a chat.completions client)
-  5. Native Anthropic
-  6. Direct API-key providers (z.ai/GLM, Kimi/Moonshot, MiniMax, MiniMax-CN)
-  7. None
+  6. Native Anthropic
+  7. Direct API-key providers (z.ai/GLM, Kimi/Moonshot, MiniMax, MiniMax-CN)
+  8. None
 
 Resolution order for vision/multimodal tasks (auto mode):
   1. Selected main provider, if it is one of the supported vision backends below
@@ -1451,19 +1453,72 @@ def _strict_vision_backend_available(provider: str) -> bool:
     return _resolve_strict_vision_backend(provider)[0] is not None
 
 
-def _preferred_main_vision_provider() -> Optional[str]:
-    """Return the selected main provider when it is also a supported vision backend."""
-    try:
-        from hermes_cli.config import load_config
+def _main_model_supports_vision(provider: Optional[str], model: Optional[str]) -> bool:
+    """Best-effort check for whether the active model can handle image input.
 
-        config = load_config()
-        model_cfg = config.get("model", {})
-        if isinstance(model_cfg, dict):
-            provider = _normalize_vision_provider(model_cfg.get("provider", ""))
-            if provider in _VISION_AUTO_PROVIDER_ORDER:
-                return provider
+    We prefer the user's current model for vision when we know it is multimodal.
+    That avoids silently burning OpenRouter/Gemini credits for capabilities the
+    main model already has. When capability metadata is missing, fall back to a
+    conservative set of provider/model heuristics.
+    """
+    provider_id = _normalize_vision_provider(provider)
+    model_id = str(model or "").strip()
+    if not provider_id or provider_id in ("auto", "") or not model_id:
+        return False
+
+    # First try models.dev capability metadata when available.
+    try:
+        from agent.models_dev import get_model_capabilities
+
+        candidate_provider = provider_id
+        candidate_model = model_id
+        if provider_id == "openai-codex":
+            candidate_provider = "openai"
+            candidate_model = model_id.split("/", 1)[1] if "/" in model_id else model_id
+
+        capabilities = get_model_capabilities(candidate_provider, candidate_model)
+        if capabilities is not None:
+            return bool(capabilities.supports_vision)
     except Exception:
         pass
+
+    model_lower = model_id.lower()
+
+    # Known multimodal families when metadata is unavailable.
+    generic_patterns = (
+        "gpt-4o",
+        "gpt-4.1",
+        "gpt-5",
+        "claude-3",
+        "claude-sonnet-4",
+        "claude-haiku-4",
+        "gemini",
+        "grok",
+        "llava",
+        "pixtral",
+        "vision",
+        "-vl",
+        "omni",
+        "mimo",
+    )
+    if any(pattern in model_lower for pattern in generic_patterns):
+        return True
+
+    if provider_id == "openai-codex":
+        return model_lower.startswith(("gpt-5", "gpt-4o", "gpt-4.1", "o3", "o4"))
+
+    if provider_id == "custom":
+        return any(pattern in model_lower for pattern in ("qwen", "vl", "llava", "pixtral", "gpt-4o", "gpt-5", "grok", "gemini", "omni"))
+
+    return False
+
+
+def _preferred_main_vision_provider() -> Optional[str]:
+    """Return the selected main provider when the active model is vision-capable."""
+    provider = _read_main_provider()
+    model = _read_main_model()
+    if _main_model_supports_vision(provider, model):
+        return provider or None
     return None
 
 
@@ -1529,10 +1584,26 @@ def resolve_vision_provider_client(
 
     if requested == "auto":
         # Vision auto-detection order:
-        #   1. OpenRouter  (known vision-capable default model)
-        #   2. Nous Portal (known vision-capable default model)
-        #   3. Active provider + model (user's main chat config)
-        #   4. Stop
+        #   1. Active provider + active model, when that model is known to support vision
+        #   2. OpenRouter  (known vision-capable default model)
+        #   3. Nous Portal (known vision-capable default model)
+        #   4. Active provider + model as a last-resort fallback for custom/experimental setups
+        preferred_main_provider = _preferred_main_vision_provider()
+        main_model = _read_main_model()
+        if preferred_main_provider and main_model:
+            sync_client, resolved_main_model = resolve_provider_client(
+                preferred_main_provider, main_model)
+            if sync_client is not None:
+                logger.info(
+                    "Vision auto-detect: using active provider %s (%s)",
+                    preferred_main_provider, resolved_main_model or main_model,
+                )
+                return _finalize(
+                    preferred_main_provider,
+                    sync_client,
+                    resolved_main_model or main_model,
+                )
+
         for candidate in _VISION_AUTO_PROVIDER_ORDER:
             sync_client, default_model = _resolve_strict_vision_backend(candidate)
             if sync_client is not None:
@@ -1540,13 +1611,12 @@ def resolve_vision_provider_client(
 
         # Fall back to the user's active provider + model.
         main_provider = _read_main_provider()
-        main_model = _read_main_model()
         if main_provider and main_provider not in ("auto", ""):
             sync_client, resolved_model = resolve_provider_client(
                 main_provider, main_model)
             if sync_client is not None:
                 logger.info(
-                    "Vision auto-detect: using active provider %s (%s)",
+                    "Vision auto-detect: using fallback provider %s (%s)",
                     main_provider, resolved_model or main_model,
                 )
                 return _finalize(

@@ -168,6 +168,7 @@ When a task's provider is set to `"auto"` (the default), Hermes tries providers 
 **For text tasks (compression, web extract, etc.):**
 
 ```text
+Main provider (when it's a non-aggregator like Codex, custom, Anthropic, Z.AI, etc.) →
 OpenRouter → Nous Portal → Custom endpoint → Codex OAuth →
 API-key providers (z.ai, Kimi, MiniMax, Hugging Face, Anthropic) → give up
 ```

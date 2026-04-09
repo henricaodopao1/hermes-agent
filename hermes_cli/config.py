@@ -301,12 +301,11 @@ DEFAULT_CONFIG = {
         "cheap_model": {},
     },
     
-    # Auxiliary model config — provider:model for each side task.
+    # Auxiliary models for side tasks (vision, web summarization, context compression).
     # Format: provider is the provider name, model is the model slug.
-    # "auto" for provider = auto-detect best available provider.
-    # Empty model = use provider's default auxiliary model.
-    # All tasks fall back to openrouter:google/gemini-3-flash-preview if
-    # the configured provider is unavailable.
+    # "auto" for provider = prefer the active main model/provider when it already
+    # supports the task, otherwise auto-detect the best fallback provider.
+    # Empty model = use the resolved provider's default auxiliary model.
     "auxiliary": {
         "vision": {
             "provider": "auto",    # auto | openrouter | nous | codex | custom

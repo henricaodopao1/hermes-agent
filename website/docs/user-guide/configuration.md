@@ -454,7 +454,7 @@ compression:
   enabled: true
   threshold: 0.50
 ```
-Uses the first available provider (OpenRouter → Nous → Codex) with Gemini Flash.
+Uses your active main model/provider first when it already fits the task. Otherwise Hermes falls back through the auxiliary chain (for example OpenRouter → Nous → Codex, often with Gemini Flash).
 
 **Force a specific provider** (OAuth or API-key based):
 ```yaml
@@ -539,7 +539,7 @@ Options: `fill_first` (default), `round_robin`, `least_used`, `random`. See [Cre
 
 ## Auxiliary Models
 
-Hermes uses lightweight "auxiliary" models for side tasks like image analysis, web page summarization, and browser screenshot analysis. By default, these use **Gemini Flash** via auto-detection — you don't need to configure anything.
+Hermes uses lightweight "auxiliary" models for side tasks like image analysis, web page summarization, and browser screenshot analysis. In `auto` mode, Hermes first tries your active main model/provider when it already supports the task. If not, it auto-detects a fallback backend — often **Gemini Flash** when OpenRouter is configured — so you still don't need to configure anything manually.
 
 ### The universal config pattern
 
@@ -649,7 +649,7 @@ AUXILIARY_VISION_MODEL=openai/gpt-4o
 
 | Provider | Description | Requirements |
 |----------|-------------|-------------|
-| `"auto"` | Best available (default). Vision tries OpenRouter → Nous → Codex. | — |
+| `"auto"` | Best available (default). Hermes first tries your active model/provider when it already supports vision, then falls back (for example OpenRouter → Nous → Codex). | — |
 | `"openrouter"` | Force OpenRouter — routes to any model (Gemini, GPT-4o, Claude, etc.) | `OPENROUTER_API_KEY` |
 | `"nous"` | Force Nous Portal | `hermes auth` |
 | `"codex"` | Force Codex OAuth (ChatGPT account). Supports vision (gpt-5.3-codex). | `hermes model` → Codex |

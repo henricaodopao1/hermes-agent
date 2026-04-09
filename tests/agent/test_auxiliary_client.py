@@ -513,6 +513,28 @@ class TestGetTextAuxiliaryClient:
             client, model = get_text_auxiliary_client()
         assert model == "google/gemini-3-flash-preview"
 
+    def test_active_codex_model_beats_openrouter_for_text_tasks(self, monkeypatch):
+        """Web summarization/compression should use the paid-for main model first."""
+        monkeypatch.setenv("OPENROUTER_API_KEY", "or-key")
+        config = {
+            "model": {
+                "provider": "openai-codex",
+                "default": "gpt-5.4",
+            }
+        }
+        monkeypatch.setattr("hermes_cli.config.load_config", lambda: config)
+        with (
+            patch("agent.auxiliary_client._read_nous_auth", return_value=None),
+            patch("agent.auxiliary_client._read_codex_access_token", return_value="codex-token"),
+            patch("agent.auxiliary_client.OpenAI") as mock_openai,
+        ):
+            client, model = get_text_auxiliary_client("web_extract")
+
+        assert model == "gpt-5.4"
+        from agent.auxiliary_client import CodexAuxiliaryClient
+        assert isinstance(client, CodexAuxiliaryClient)
+        mock_openai.assert_called()
+
     def test_custom_endpoint_over_codex(self, monkeypatch, codex_auth_dir):
         config = {
             "model": {
@@ -737,21 +759,22 @@ class TestAuxiliaryPoolAwareness:
         assert client is not None
         assert client.__class__.__name__ == "AnthropicAuxiliaryClient"
 
-    def test_vision_auto_prefers_openrouter_over_active_provider(self, monkeypatch):
-        """OpenRouter is tried before the active provider in vision auto."""
+    def test_vision_auto_prefers_active_codex_model_over_openrouter(self, monkeypatch):
+        """If the active model already supports vision, don't burn OpenRouter credits."""
         monkeypatch.setenv("OPENROUTER_API_KEY", "or-key")
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "***")
 
         with (
             patch("agent.auxiliary_client._read_nous_auth", return_value=None),
-            patch("agent.auxiliary_client._read_main_provider", return_value="anthropic"),
-            patch("agent.auxiliary_client._read_main_model", return_value="claude-sonnet-4"),
+            patch("agent.auxiliary_client._read_main_provider", return_value="openai-codex"),
+            patch("agent.auxiliary_client._read_main_model", return_value="gpt-5.4"),
+            patch("agent.auxiliary_client._read_codex_access_token", return_value="codex-token"),
             patch("agent.auxiliary_client.OpenAI") as mock_openai,
         ):
             provider, client, model = resolve_vision_provider_client()
 
-        # OpenRouter should win over anthropic active provider
-        assert provider == "openrouter"
+        assert provider == "openai-codex"
+        assert model == "gpt-5.4"
+        mock_openai.assert_called()
 
     def test_vision_auto_uses_named_custom_as_active_provider(self, monkeypatch):
         """Named custom provider works as active provider fallback in vision auto."""
