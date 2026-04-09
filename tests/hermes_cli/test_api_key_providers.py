@@ -1,4 +1,4 @@
-"""Tests for API-key provider support (z.ai/GLM, Kimi, MiniMax, AI Gateway)."""
+"""Tests for API-key provider support (z.ai/GLM, xAI, Kimi, MiniMax, AI Gateway)."""
 
 import os
 import sys
@@ -40,6 +40,7 @@ class TestProviderRegistry:
         ("copilot", "GitHub Copilot", "api_key"),
         ("huggingface", "Hugging Face", "api_key"),
         ("zai", "Z.AI / GLM", "api_key"),
+        ("xai", "xAI (Grok)", "api_key"),
         ("kimi-coding", "Kimi / Moonshot", "api_key"),
         ("minimax", "MiniMax", "api_key"),
         ("minimax-cn", "MiniMax (China)", "api_key"),
@@ -57,6 +58,11 @@ class TestProviderRegistry:
         pconfig = PROVIDER_REGISTRY["zai"]
         assert pconfig.api_key_env_vars == ("GLM_API_KEY", "ZAI_API_KEY", "Z_AI_API_KEY")
         assert pconfig.base_url_env_var == "GLM_BASE_URL"
+
+    def test_xai_env_vars(self):
+        pconfig = PROVIDER_REGISTRY["xai"]
+        assert pconfig.api_key_env_vars == ("XAI_API_KEY",)
+        assert pconfig.base_url_env_var == "XAI_BASE_URL"
 
     def test_copilot_env_vars(self):
         pconfig = PROVIDER_REGISTRY["copilot"]
@@ -97,6 +103,7 @@ class TestProviderRegistry:
         assert PROVIDER_REGISTRY["copilot"].inference_base_url == "https://api.githubcopilot.com"
         assert PROVIDER_REGISTRY["copilot-acp"].inference_base_url == "acp://copilot"
         assert PROVIDER_REGISTRY["zai"].inference_base_url == "https://api.z.ai/api/paas/v4"
+        assert PROVIDER_REGISTRY["xai"].inference_base_url == "https://api.x.ai/v1"
         assert PROVIDER_REGISTRY["kimi-coding"].inference_base_url == "https://api.moonshot.ai/v1"
         assert PROVIDER_REGISTRY["minimax"].inference_base_url == "https://api.minimax.io/anthropic"
         assert PROVIDER_REGISTRY["minimax-cn"].inference_base_url == "https://api.minimaxi.com/anthropic"
@@ -119,7 +126,7 @@ class TestProviderRegistry:
 PROVIDER_ENV_VARS = (
     "OPENROUTER_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "ANTHROPIC_TOKEN",
     "CLAUDE_CODE_OAUTH_TOKEN",
-    "GLM_API_KEY", "ZAI_API_KEY", "Z_AI_API_KEY",
+    "GLM_API_KEY", "ZAI_API_KEY", "Z_AI_API_KEY", "XAI_API_KEY", "XAI_BASE_URL",
     "KIMI_API_KEY", "KIMI_BASE_URL", "MINIMAX_API_KEY", "MINIMAX_CN_API_KEY",
     "AI_GATEWAY_API_KEY", "AI_GATEWAY_BASE_URL",
     "KILOCODE_API_KEY", "KILOCODE_BASE_URL",
@@ -143,6 +150,9 @@ class TestResolveProvider:
     def test_explicit_zai(self):
         assert resolve_provider("zai") == "zai"
 
+    def test_explicit_xai(self):
+        assert resolve_provider("xai") == "xai"
+
     def test_explicit_kimi_coding(self):
         assert resolve_provider("kimi-coding") == "kimi-coding"
 
@@ -163,6 +173,12 @@ class TestResolveProvider:
 
     def test_alias_zhipu(self):
         assert resolve_provider("zhipu") == "zai"
+
+    def test_alias_x_ai(self):
+        assert resolve_provider("x-ai") == "xai"
+
+    def test_alias_grok(self):
+        assert resolve_provider("grok") == "xai"
 
     def test_alias_kimi(self):
         assert resolve_provider("kimi") == "kimi-coding"
@@ -195,6 +211,7 @@ class TestResolveProvider:
         assert resolve_provider("GLM") == "zai"
         assert resolve_provider("Z-AI") == "zai"
         assert resolve_provider("Kimi") == "kimi-coding"
+        assert resolve_provider("Grok") == "xai"
 
     def test_alias_github_copilot(self):
         assert resolve_provider("github-copilot") == "copilot"
@@ -258,6 +275,10 @@ class TestResolveProvider:
         monkeypatch.setenv("HF_TOKEN", "hf_test_token")
         assert resolve_provider("auto") == "huggingface"
 
+    def test_auto_detects_xai_key(self, monkeypatch):
+        monkeypatch.setenv("XAI_API_KEY", "xai-secret-key")
+        assert resolve_provider("auto") == "xai"
+
     def test_openrouter_takes_priority_over_glm(self, monkeypatch):
         """OpenRouter API key should win over GLM in auto-detection."""
         monkeypatch.setenv("OPENROUTER_API_KEY", "or-key")
@@ -295,6 +316,13 @@ class TestApiKeyProviderStatus:
         status = get_api_key_provider_status("zai")
         assert status["configured"] is True
         assert status["key_source"] == "ZAI_API_KEY"
+
+    def test_xai_status_uses_default_base_url(self, monkeypatch):
+        monkeypatch.setenv("XAI_API_KEY", "xai-secret-key")
+        status = get_api_key_provider_status("xai")
+        assert status["configured"] is True
+        assert status["key_source"] == "XAI_API_KEY"
+        assert status["base_url"] == "https://api.x.ai/v1"
 
     def test_custom_base_url(self, monkeypatch):
         monkeypatch.setenv("KIMI_API_KEY", "kimi-key")
@@ -356,6 +384,14 @@ class TestResolveApiKeyProviderCredentials:
         assert creds["api_key"] == "glm-secret-key"
         assert creds["base_url"] == "https://api.z.ai/api/paas/v4"
         assert creds["source"] == "GLM_API_KEY"
+
+    def test_resolve_xai_with_key(self, monkeypatch):
+        monkeypatch.setenv("XAI_API_KEY", "xai-secret-key")
+        creds = resolve_api_key_provider_credentials("xai")
+        assert creds["provider"] == "xai"
+        assert creds["api_key"] == "xai-secret-key"
+        assert creds["base_url"] == "https://api.x.ai/v1"
+        assert creds["source"] == "XAI_API_KEY"
 
     def test_resolve_copilot_with_github_token(self, monkeypatch):
         monkeypatch.setenv("GITHUB_TOKEN", "gh-env-secret")
@@ -452,6 +488,12 @@ class TestResolveApiKeyProviderCredentials:
         monkeypatch.setenv("KILOCODE_BASE_URL", "https://custom.kilo.example/v1")
         creds = resolve_api_key_provider_credentials("kilocode")
         assert creds["base_url"] == "https://custom.kilo.example/v1"
+
+    def test_resolve_xai_custom_base_url(self, monkeypatch):
+        monkeypatch.setenv("XAI_API_KEY", "xai-key")
+        monkeypatch.setenv("XAI_BASE_URL", "https://proxy.example/xai/v1")
+        creds = resolve_api_key_provider_credentials("xai")
+        assert creds["base_url"] == "https://proxy.example/xai/v1"
 
     def test_resolve_with_custom_base_url(self, monkeypatch):
         monkeypatch.setenv("GLM_API_KEY", "glm-key")
@@ -633,9 +675,9 @@ class TestHasAnyProviderConfigured:
         monkeypatch.setattr(config_module, "get_env_path", lambda: hermes_home / ".env")
         monkeypatch.setattr(config_module, "get_hermes_home", lambda: hermes_home)
         # Clear all provider env vars so earlier checks don't short-circuit
-        for var in ("OPENROUTER_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY",
-                     "ANTHROPIC_TOKEN", "OPENAI_BASE_URL"):
+        for var in PROVIDER_ENV_VARS:
             monkeypatch.delenv(var, raising=False)
+        monkeypatch.setattr("hermes_cli.copilot_auth._try_gh_cli_token", lambda: None)
         # Simulate valid Claude Code credentials
         monkeypatch.setattr(
             "agent.anthropic_adapter.read_claude_code_credentials",
@@ -662,8 +704,7 @@ class TestHasAnyProviderConfigured:
         monkeypatch.setattr(config_module, "get_hermes_home", lambda: hermes_home)
         monkeypatch.setenv("HERMES_HOME", str(hermes_home))
         # Clear all provider env vars
-        for var in ("OPENROUTER_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY",
-                     "ANTHROPIC_TOKEN", "OPENAI_BASE_URL"):
+        for var in PROVIDER_ENV_VARS:
             monkeypatch.delenv(var, raising=False)
         from hermes_cli.main import _has_any_provider_configured
         assert _has_any_provider_configured() is True
@@ -681,8 +722,7 @@ class TestHasAnyProviderConfigured:
         monkeypatch.setattr(config_module, "get_env_path", lambda: hermes_home / ".env")
         monkeypatch.setattr(config_module, "get_hermes_home", lambda: hermes_home)
         monkeypatch.setenv("HERMES_HOME", str(hermes_home))
-        for var in ("OPENROUTER_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY",
-                     "ANTHROPIC_TOKEN", "OPENAI_BASE_URL"):
+        for var in PROVIDER_ENV_VARS:
             monkeypatch.delenv(var, raising=False)
         from hermes_cli.main import _has_any_provider_configured
         assert _has_any_provider_configured() is True
@@ -700,8 +740,7 @@ class TestHasAnyProviderConfigured:
         monkeypatch.setattr(config_module, "get_env_path", lambda: hermes_home / ".env")
         monkeypatch.setattr(config_module, "get_hermes_home", lambda: hermes_home)
         monkeypatch.setenv("HERMES_HOME", str(hermes_home))
-        for var in ("OPENROUTER_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY",
-                     "ANTHROPIC_TOKEN", "OPENAI_BASE_URL"):
+        for var in PROVIDER_ENV_VARS:
             monkeypatch.delenv(var, raising=False)
         from hermes_cli.main import _has_any_provider_configured
         assert _has_any_provider_configured() is True
@@ -719,9 +758,9 @@ class TestHasAnyProviderConfigured:
         monkeypatch.setattr(config_module, "get_env_path", lambda: hermes_home / ".env")
         monkeypatch.setattr(config_module, "get_hermes_home", lambda: hermes_home)
         monkeypatch.setenv("HERMES_HOME", str(hermes_home))
-        for var in ("OPENROUTER_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY",
-                     "ANTHROPIC_TOKEN", "OPENAI_BASE_URL"):
+        for var in PROVIDER_ENV_VARS:
             monkeypatch.delenv(var, raising=False)
+        monkeypatch.setattr("hermes_cli.copilot_auth._try_gh_cli_token", lambda: None)
         from hermes_cli.main import _has_any_provider_configured
         assert _has_any_provider_configured() is False
 
@@ -738,8 +777,7 @@ class TestHasAnyProviderConfigured:
         monkeypatch.setattr(config_module, "get_hermes_home", lambda: hermes_home)
         monkeypatch.setenv("HERMES_HOME", str(hermes_home))
         # Clear all provider env vars
-        for var in ("OPENROUTER_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY",
-                     "ANTHROPIC_TOKEN", "OPENAI_BASE_URL"):
+        for var in PROVIDER_ENV_VARS:
             monkeypatch.delenv(var, raising=False)
         # Simulate valid Claude Code credentials
         monkeypatch.setattr(
@@ -957,8 +995,47 @@ class TestHuggingFaceModels:
         from hermes_cli.models import _PROVIDER_ALIASES
         assert _PROVIDER_ALIASES.get("hf") == "huggingface"
         assert _PROVIDER_ALIASES.get("hugging-face") == "huggingface"
+        assert _PROVIDER_ALIASES.get("x-ai") == "xai"
+        assert _PROVIDER_ALIASES.get("grok") == "xai"
 
     def test_provider_label(self):
         from hermes_cli.models import _PROVIDER_LABELS
         assert "huggingface" in _PROVIDER_LABELS
         assert _PROVIDER_LABELS["huggingface"] == "Hugging Face"
+        assert _PROVIDER_LABELS["xai"] == "xAI (Grok)"
+
+
+class TestProviderSelectionMenu:
+    def test_xai_is_offered_from_more_providers_menu(self, monkeypatch):
+        from hermes_cli import main as main_mod
+        import hermes_cli.auth as auth_mod
+        import hermes_cli.config as config_mod
+
+        monkeypatch.setattr(config_mod, "load_config", lambda: {})
+        monkeypatch.setattr(config_mod, "get_env_value", lambda *_args, **_kwargs: "")
+        monkeypatch.setattr(auth_mod, "resolve_provider", lambda *_args, **_kwargs: "openrouter")
+
+        prompt_calls = []
+
+        def fake_prompt_provider_choice(choices, default=0):
+            prompt_calls.append(list(choices))
+            if len(prompt_calls) == 1:
+                return choices.index("More providers...")
+            for idx, choice in enumerate(choices):
+                if "xAI" in choice and "Grok" in choice:
+                    return idx
+            raise AssertionError(f"xAI provider not found in menu: {choices}")
+
+        selected = {}
+
+        monkeypatch.setattr(main_mod, "_prompt_provider_choice", fake_prompt_provider_choice)
+        monkeypatch.setattr(
+            main_mod,
+            "_model_flow_api_key_provider",
+            lambda _config, provider_id, current_model="": selected.setdefault("provider", provider_id),
+        )
+
+        main_mod.select_provider_and_model()
+
+        assert len(prompt_calls) == 2
+        assert selected["provider"] == "xai"

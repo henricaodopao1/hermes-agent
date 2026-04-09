@@ -647,6 +647,22 @@ OPTIONAL_ENV_VARS = {
         "category": "provider",
         "advanced": True,
     },
+    "XAI_API_KEY": {
+        "description": "xAI API key for direct Grok access",
+        "prompt": "xAI API key",
+        "url": "https://console.x.ai/",
+        "password": True,
+        "category": "provider",
+        "advanced": True,
+    },
+    "XAI_BASE_URL": {
+        "description": "xAI base URL override",
+        "prompt": "xAI base URL (leave empty for default)",
+        "url": None,
+        "password": False,
+        "category": "provider",
+        "advanced": True,
+    },
     "KIMI_API_KEY": {
         "description": "Kimi / Moonshot API key",
         "prompt": "Kimi API key",

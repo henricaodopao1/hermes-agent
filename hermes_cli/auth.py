@@ -142,6 +142,14 @@ PROVIDER_REGISTRY: Dict[str, ProviderConfig] = {
         api_key_env_vars=("GLM_API_KEY", "ZAI_API_KEY", "Z_AI_API_KEY"),
         base_url_env_var="GLM_BASE_URL",
     ),
+    "xai": ProviderConfig(
+        id="xai",
+        name="xAI (Grok)",
+        auth_type="api_key",
+        inference_base_url="https://api.x.ai/v1",
+        api_key_env_vars=("XAI_API_KEY",),
+        base_url_env_var="XAI_BASE_URL",
+    ),
     "kimi-coding": ProviderConfig(
         id="kimi-coding",
         name="Kimi / Moonshot",
@@ -808,6 +816,7 @@ def resolve_provider(
     # Normalize provider aliases
     _PROVIDER_ALIASES = {
         "glm": "zai", "z-ai": "zai", "z.ai": "zai", "zhipu": "zai",
+        "x-ai": "xai", "x.ai": "xai", "grok": "xai",
         "google": "gemini", "google-gemini": "gemini", "google-ai-studio": "gemini",
         "kimi": "kimi-coding", "moonshot": "kimi-coding",
         "minimax-china": "minimax-cn", "minimax_cn": "minimax-cn",

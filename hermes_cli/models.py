@@ -126,6 +126,12 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
         "glm-4.5",
         "glm-4.5-flash",
     ],
+    "xai": [
+        "grok-4",
+        "grok-4.20-reasoning",
+        "grok-4.20-beta-latest-non-reasoning",
+        "grok-3",
+    ],
     "kimi-coding": [
         "kimi-for-coding",
         "kimi-k2.5",
@@ -470,6 +476,7 @@ _PROVIDER_LABELS = {
     "copilot": "GitHub Copilot",
     "gemini": "Google AI Studio",
     "zai": "Z.AI / GLM",
+    "xai": "xAI (Grok)",
     "kimi-coding": "Kimi / Moonshot",
     "minimax": "MiniMax",
     "minimax-cn": "MiniMax (China)",
@@ -489,6 +496,9 @@ _PROVIDER_ALIASES = {
     "z-ai": "zai",
     "z.ai": "zai",
     "zhipu": "zai",
+    "x-ai": "xai",
+    "x.ai": "xai",
+    "grok": "xai",
     "github": "copilot",
     "github-copilot": "copilot",
     "github-models": "copilot",
@@ -765,7 +775,7 @@ def list_available_providers() -> list[dict[str, str]]:
         "gemini", "huggingface",
         "zai", "kimi-coding", "minimax", "minimax-cn", "kilocode", "anthropic", "alibaba",
         "opencode-zen", "opencode-go",
-        "ai-gateway", "deepseek", "custom",
+        "ai-gateway", "xai", "deepseek", "custom",
     ]
     # Build reverse alias map
     aliases_for: dict[str, list[str]] = {}

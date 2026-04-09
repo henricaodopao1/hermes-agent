@@ -363,6 +363,16 @@ class TestSanitizeEnvLines:
 class TestOptionalEnvVarsRegistry:
     """Verify that key env vars are registered in OPTIONAL_ENV_VARS."""
 
+    def test_xai_api_key_registered(self):
+        from hermes_cli.config import OPTIONAL_ENV_VARS
+        assert "XAI_API_KEY" in OPTIONAL_ENV_VARS
+
+    def test_xai_api_key_metadata(self):
+        from hermes_cli.config import OPTIONAL_ENV_VARS
+        assert OPTIONAL_ENV_VARS["XAI_API_KEY"]["category"] == "provider"
+        assert OPTIONAL_ENV_VARS["XAI_API_KEY"]["password"] is True
+        assert OPTIONAL_ENV_VARS["XAI_API_KEY"]["url"] == "https://console.x.ai/"
+
     def test_tavily_api_key_registered(self):
         """TAVILY_API_KEY is listed in OPTIONAL_ENV_VARS."""
         from hermes_cli.config import OPTIONAL_ENV_VARS
