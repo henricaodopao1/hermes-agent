@@ -1544,6 +1544,7 @@ class HermesCLI:
         self._clarify_state = None
         self._clarify_freetext = False
         self._clarify_deadline = 0
+        self._model_picker_state = None
         self._sudo_state = None
         self._sudo_deadline = 0
         self._approval_state = None
@@ -3754,7 +3755,141 @@ class HermesCLI:
         print(f"(^_^)b Undid {removed_count} message(s). Removed: \"{removed_msg[:60]}{'...' if len(removed_msg) > 60 else ''}\"")
         remaining = len(self.conversation_history)
         print(f"  {remaining} message(s) remaining in history.")
-    
+
+    def _interactive_model_selection(self, providers: list[dict]) -> tuple[str, str] | None:
+        """Pick a provider/model pair using the native prompt_toolkit UI state."""
+        if not providers:
+            return None
+
+        response_queue = queue.Queue()
+        default_provider_idx = 0
+        provider_choices = []
+        for idx, provider in enumerate(providers):
+            provider_choices.append(provider["name"])
+            if provider.get("is_current"):
+                default_provider_idx = idx
+
+        self._model_picker_state = {
+            "stage": "provider",
+            "title": "Select provider",
+            "providers": providers,
+            "choices": provider_choices,
+            "selected": default_provider_idx,
+            "response_queue": response_queue,
+        }
+        self._invalidate()
+
+        while True:
+            try:
+                result = response_queue.get(timeout=0.1)
+                self._model_picker_state = None
+                self._invalidate()
+                return result
+            except queue.Empty:
+                if getattr(self, "_should_exit", False):
+                    self._model_picker_state = None
+                    self._invalidate()
+                    return None
+
+    def _handle_model_picker_selection(self) -> None:
+        """Advance the /model picker or emit the final provider/model selection."""
+        state = getattr(self, "_model_picker_state", None)
+        if not state:
+            return
+
+        choices = state.get("choices") or []
+        selected = state.get("selected", 0)
+        if not (0 <= selected < len(choices)):
+            return
+
+        if state.get("stage") == "provider":
+            providers = state.get("providers") or []
+            if not (0 <= selected < len(providers)):
+                return
+            provider = providers[selected]
+            models = list(dict.fromkeys(mid for mid in (provider.get("all_models") or provider.get("models") or []) if mid))
+            if not models:
+                state["response_queue"].put(None)
+                return
+            default_model_idx = 0
+            if provider.get("is_current") and self.model in models:
+                default_model_idx = models.index(self.model)
+            state["stage"] = "model"
+            state["title"] = f"Select model ({provider['name']})"
+            state["provider_slug"] = provider["slug"]
+            state["provider_name"] = provider["name"]
+            state["choices"] = models
+            state["selected"] = default_model_idx
+            self._invalidate()
+            return
+
+        state["response_queue"].put((choices[selected], state.get("provider_slug", "")))
+
+    def _cancel_model_picker(self) -> None:
+        state = getattr(self, "_model_picker_state", None)
+        if not state:
+            return
+        state["response_queue"].put(None)
+        self._model_picker_state = None
+        self._invalidate()
+
+    def _get_model_picker_display_fragments(self):
+        """Render the /model provider/model picker panel inside the TUI."""
+        state = getattr(self, "_model_picker_state", None)
+        if not state:
+            return []
+
+        def _panel_box_width(title_text: str, content_lines: list[str], min_width: int = 46, max_width: int = 76) -> int:
+            term_cols = shutil.get_terminal_size((100, 20)).columns
+            longest = max([len(title_text)] + [len(line) for line in content_lines] + [min_width - 4])
+            inner = min(max(longest + 4, min_width - 2), max_width - 2, max(24, term_cols - 6))
+            return inner + 2
+
+        def _wrap_panel_text(text: str, width: int, subsequent_indent: str = "") -> list[str]:
+            wrapped = textwrap.wrap(
+                text,
+                width=max(8, width),
+                replace_whitespace=False,
+                drop_whitespace=False,
+                subsequent_indent=subsequent_indent,
+            )
+            return wrapped or [""]
+
+        def _append_panel_line(lines, border_style: str, content_style: str, text: str, box_width: int) -> None:
+            inner_width = max(0, box_width - 2)
+            lines.append((border_style, "│ "))
+            lines.append((content_style, text.ljust(inner_width)))
+            lines.append((border_style, " │\n"))
+
+        def _append_blank_panel_line(lines, border_style: str, box_width: int) -> None:
+            lines.append((border_style, "│" + (" " * box_width) + "│\n"))
+
+        title = state.get("title") or "Select model"
+        choices = state.get("choices") or []
+        selected = state.get("selected", 0)
+        preview_lines = [f"Current: {self.model} on {self.provider}"]
+        for idx, choice in enumerate(choices):
+            prefix = "❯ " if idx == selected else "  "
+            preview_lines.extend(_wrap_panel_text(f"{prefix}{choice}", 60, subsequent_indent="  "))
+        box_width = _panel_box_width(title, preview_lines)
+        inner_text_width = max(8, box_width - 2)
+
+        lines = []
+        lines.append(("class:model-picker-border", "╭" + ("─" * box_width) + "╮\n"))
+        _append_panel_line(lines, "class:model-picker-border", "class:model-picker-title", title, box_width)
+        _append_blank_panel_line(lines, "class:model-picker-border", box_width)
+        for wrapped in _wrap_panel_text(f"Current: {self.model} on {self.provider}", inner_text_width):
+            _append_panel_line(lines, "class:model-picker-border", "class:model-picker-meta", wrapped, box_width)
+        _append_blank_panel_line(lines, "class:model-picker-border", box_width)
+        for idx, choice in enumerate(choices):
+            style = "class:model-picker-selected" if idx == selected else "class:model-picker-choice"
+            prefix = "❯ " if idx == selected else "  "
+            for wrapped in _wrap_panel_text(f"{prefix}{choice}", inner_text_width, subsequent_indent="  "):
+                _append_panel_line(lines, "class:model-picker-border", style, wrapped, box_width)
+        _append_blank_panel_line(lines, "class:model-picker-border", box_width)
+        lines.append(("class:model-picker-border", "╰" + ("─" * box_width) + "╯\n"))
+        return lines
+
     def _handle_model_switch(self, cmd_original: str):
         """Handle /model command — switch model for this session.
 
@@ -3775,57 +3910,39 @@ class HermesCLI:
         # Parse --provider and --global flags
         model_input, explicit_provider, persist_global = parse_model_flags(raw_args)
 
-        # No args at all: show available providers + models
+        user_provs = None
+        try:
+            from hermes_cli.config import load_config
+            cfg = load_config()
+            user_provs = cfg.get("providers")
+        except Exception:
+            pass
+
+        # No args at all: open an interactive picker instead of dumping usage text
         if not model_input and not explicit_provider:
-            model_display = self.model or "unknown"
-            provider_display = get_label(self.provider) if self.provider else "unknown"
-            _cprint(f"  Current: {model_display} on {provider_display}")
-            _cprint("")
-
-            # Show authenticated providers with top models
             try:
-                # Load user providers from config
-                user_provs = None
-                try:
-                    from hermes_cli.config import load_config
-                    cfg = load_config()
-                    user_provs = cfg.get("providers")
-                except Exception:
-                    pass
-
                 providers = list_authenticated_providers(
                     current_provider=self.provider or "",
                     user_providers=user_provs,
-                    max_models=6,
+                    max_models=20,
                 )
-                if providers:
-                    for p in providers:
-                        tag = " (current)" if p["is_current"] else ""
-                        _cprint(f"  {p['name']} [--provider {p['slug']}]{tag}:")
-                        if p["models"]:
-                            model_strs = ", ".join(p["models"])
-                            extra = f"  (+{p['total_models'] - len(p['models'])} more)" if p["total_models"] > len(p["models"]) else ""
-                            _cprint(f"    {model_strs}{extra}")
-                        elif p.get("api_url"):
-                            _cprint(f"    {p['api_url']} (use /model <name> --provider {p['slug']})")
-                        else:
-                            _cprint(f"    (no models listed)")
-                        _cprint("")
-                else:
+                if not providers:
                     _cprint("  No authenticated providers found.")
-                    _cprint("")
+                    _cprint("  Run: hermes model or hermes setup")
+                    return
+                selection = self._interactive_model_selection(providers)
+                if selection is None:
+                    _cprint("  No change.")
+                    return
+                model_input, explicit_provider = selection
             except Exception:
-                pass
-
-            # Aliases
-            from hermes_cli.model_switch import MODEL_ALIASES
-            alias_list = ", ".join(sorted(MODEL_ALIASES.keys()))
-            _cprint(f"  Aliases: {alias_list}")
-            _cprint("")
-            _cprint("  /model <name>                        switch model")
-            _cprint("  /model <name> --provider <slug>      switch provider")
-            _cprint("  /model <name> --global               persist to config")
-            return
+                model_display = self.model or "unknown"
+                provider_display = get_label(self.provider) if self.provider else "unknown"
+                _cprint(f"  Current: {model_display} on {provider_display}")
+                _cprint("")
+                _cprint("  Interactive picker unavailable in this terminal.")
+                _cprint("  Use /model <name> or /model <name> --provider <slug>")
+                return
 
         # Perform the switch
         result = switch_model(
@@ -3836,6 +3953,7 @@ class HermesCLI:
             current_api_key=self.api_key or "",
             is_global=persist_global,
             explicit_provider=explicit_provider,
+            user_providers=user_provs,
         )
 
         if not result.success:
@@ -6960,6 +7078,8 @@ class HermesCLI:
             return [("class:sudo-prompt", f"🔑 {state_suffix}")]
         if self._approval_state:
             return [("class:prompt-working", f"⚠ {state_suffix}")]
+        if getattr(self, "_model_picker_state", None):
+            return [("class:prompt-working", f"⌘ {state_suffix}")]
         if self._clarify_freetext:
             return [("class:clarify-selected", f"✎ {state_suffix}")]
         if self._clarify_state:
@@ -7026,6 +7146,7 @@ class HermesCLI:
         sudo_widget,
         secret_widget,
         approval_widget,
+        model_picker_widget,
         clarify_widget,
         spinner_widget,
         spacer,
@@ -7048,6 +7169,7 @@ class HermesCLI:
             sudo_widget,
             secret_widget,
             approval_widget,
+            model_picker_widget,
             clarify_widget,
             spinner_widget,
             spacer,
@@ -7126,6 +7248,9 @@ class HermesCLI:
         self._clarify_state = None      # dict with question, choices, selected, response_queue
         self._clarify_freetext = False  # True when user chose "Other" and is typing
         self._clarify_deadline = 0      # monotonic timestamp when the clarify times out
+
+        # /model picker state: native TUI provider/model chooser.
+        self._model_picker_state = None  # dict with stage, choices, selected, response_queue
 
         # Sudo password prompt state (similar mechanism to clarify)
         self._sudo_state = None         # dict with response_queue when active
@@ -7213,6 +7338,12 @@ class HermesCLI:
                 event.app.invalidate()
                 return
 
+            # --- /model picker: confirm provider or model selection ---
+            if self._model_picker_state:
+                self._handle_model_picker_selection()
+                event.app.invalidate()
+                return
+
             # --- Approval selection: confirm the highlighted choice ---
             if self._approval_state:
                 self._handle_approval_selection()
@@ -7276,6 +7407,12 @@ class HermesCLI:
                     self._pending_input.put(payload)
                 event.app.current_buffer.reset(append_to_history=True)
         
+        @kb.add('escape', filter=Condition(lambda: bool(self._model_picker_state)))
+        def handle_model_picker_escape(event):
+            self._cancel_model_picker()
+            event.app.current_buffer.reset()
+            event.app.invalidate()
+
         @kb.add('escape', 'enter')
         def handle_alt_enter(event):
             """Alt+Enter inserts a newline for multi-line input."""
@@ -7319,6 +7456,21 @@ class HermesCLI:
                 # No menu and no suggestion — start completions from scratch
                 buf.start_completion()
 
+        # --- /model picker: arrow-key navigation ---
+
+        @kb.add('up', filter=Condition(lambda: bool(self._model_picker_state)))
+        def model_picker_up(event):
+            if self._model_picker_state:
+                self._model_picker_state["selected"] = max(0, self._model_picker_state["selected"] - 1)
+                event.app.invalidate()
+
+        @kb.add('down', filter=Condition(lambda: bool(self._model_picker_state)))
+        def model_picker_down(event):
+            if self._model_picker_state:
+                max_idx = len(self._model_picker_state.get("choices") or []) - 1
+                self._model_picker_state["selected"] = min(max_idx, self._model_picker_state["selected"] + 1)
+                event.app.invalidate()
+
         # --- Clarify tool: arrow-key navigation for multiple-choice questions ---
 
         @kb.add('up', filter=Condition(lambda: bool(self._clarify_state) and not self._clarify_freetext))
@@ -7357,7 +7509,7 @@ class HermesCLI:
         # Buffer.auto_up/auto_down handle both: cursor movement when multi-line,
         # history browsing when on the first/last line (or single-line input).
         _normal_input = Condition(
-            lambda: not self._clarify_state and not self._approval_state and not self._sudo_state and not self._secret_state
+            lambda: not self._model_picker_state and not self._clarify_state and not self._approval_state and not self._sudo_state and not self._secret_state
         )
 
         @kb.add('up', filter=_normal_input)
@@ -7413,6 +7565,13 @@ class HermesCLI:
             # Cancel secret prompt
             if self._secret_state:
                 self._cancel_secret_capture()
+                event.app.current_buffer.reset()
+                event.app.invalidate()
+                return
+
+            # Cancel /model picker
+            if self._model_picker_state:
+                self._cancel_model_picker()
                 event.app.current_buffer.reset()
                 event.app.invalidate()
                 return
@@ -7637,7 +7796,7 @@ class HermesCLI:
             style='class:input-area',
             multiline=True,
             wrap_lines=True,
-            read_only=Condition(lambda: bool(cli_ref._command_running)),
+            read_only=Condition(lambda: bool(cli_ref._command_running) or bool(cli_ref._model_picker_state)),
             history=FileHistory(str(self._history_file)),
             completer=_completer,
             complete_while_typing=True,
@@ -7802,6 +7961,11 @@ class HermesCLI:
                     ('class:clarify-countdown', f'  ({remaining}s)'),
                 ]
 
+            if cli_ref._model_picker_state:
+                return [
+                    ('class:hint', '  ↑/↓ to select, Enter to confirm, Ctrl+C to cancel'),
+                ]
+
             if cli_ref._clarify_state:
                 remaining = max(0, int(cli_ref._clarify_deadline - _time.monotonic()))
                 countdown = f'  ({remaining}s)' if cli_ref._clarify_deadline else ''
@@ -7824,7 +7988,7 @@ class HermesCLI:
             return []
 
         def get_hint_height():
-            if cli_ref._sudo_state or cli_ref._secret_state or cli_ref._approval_state or cli_ref._clarify_state or cli_ref._command_running:
+            if cli_ref._sudo_state or cli_ref._secret_state or cli_ref._approval_state or cli_ref._model_picker_state or cli_ref._clarify_state or cli_ref._command_running:
                 return 1
             # Keep a 1-line spacer while agent runs so output doesn't push
             # right up against the top rule of the input area
@@ -8028,6 +8192,17 @@ class HermesCLI:
             filter=Condition(lambda: cli_ref._approval_state is not None),
         )
 
+        def _get_model_picker_display():
+            return cli_ref._get_model_picker_display_fragments()
+
+        model_picker_widget = ConditionalContainer(
+            Window(
+                FormattedTextControl(_get_model_picker_display),
+                wrap_lines=True,
+            ),
+            filter=Condition(lambda: cli_ref._model_picker_state is not None),
+        )
+
         # Horizontal rules above and below the input (bronze, 1 line each).
         # The bottom rule moves down as the TextArea grows with newlines.
         # Using char='─' instead of hardcoded repetition so the rule
@@ -8110,6 +8285,7 @@ class HermesCLI:
                     sudo_widget=sudo_widget,
                     secret_widget=secret_widget,
                     approval_widget=approval_widget,
+                    model_picker_widget=model_picker_widget,
                     clarify_widget=clarify_widget,
                     spinner_widget=spinner_widget,
                     spacer=spacer,
@@ -8167,6 +8343,12 @@ class HermesCLI:
             'approval-cmd': '#AAAAAA italic',
             'approval-choice': '#AAAAAA',
             'approval-selected': '#FFD700 bold',
+            # Model picker panel
+            'model-picker-border': '#CD7F32',
+            'model-picker-title': '#FFD700 bold',
+            'model-picker-meta': '#AAAAAA italic',
+            'model-picker-choice': '#AAAAAA',
+            'model-picker-selected': '#FFD700 bold',
             # Voice mode
             'voice-prompt': '#87CEEB',
             'voice-recording': '#FF4444 bold',

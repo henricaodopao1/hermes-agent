@@ -107,6 +107,22 @@ def test_model_command_uses_runtime_access_token_for_codex_list(monkeypatch):
     assert captured["current_model"] == "openai/gpt-5.4"
 
 
+def test_authenticated_provider_listing_uses_codex_catalog_defaults(monkeypatch):
+    from hermes_cli.model_switch import list_authenticated_providers
+
+    monkeypatch.setattr("agent.models_dev.fetch_models_dev", lambda: {})
+    monkeypatch.setattr(
+        "hermes_cli.auth._load_auth_store",
+        lambda: {"providers": {"openai-codex": {"tokens": {"access_token": "token"}}}},
+    )
+
+    providers = list_authenticated_providers(current_provider="openai-codex", max_models=8)
+    codex_entry = next(provider for provider in providers if provider["slug"] == "openai-codex")
+
+    assert "gpt-5.4" in codex_entry["models"]
+    assert "gpt-5.4-mini" in codex_entry["models"]
+
+
 # ── Tests for _normalize_model_for_provider ──────────────────────────
 
 

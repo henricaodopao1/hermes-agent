@@ -14,6 +14,8 @@ import urllib.error
 from difflib import get_close_matches
 from typing import Any, Optional
 
+from hermes_cli.codex_models import DEFAULT_CODEX_MODELS
+
 COPILOT_BASE_URL = "https://api.githubcopilot.com"
 COPILOT_MODELS_URL = f"{COPILOT_BASE_URL}/models"
 COPILOT_EDITOR_VERSION = "vscode/1.104.1"
@@ -86,12 +88,7 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
         "openai/gpt-5.4-pro",
         "openai/gpt-5.4-nano",
     ],
-    "openai-codex": [
-        "gpt-5.3-codex",
-        "gpt-5.2-codex",
-        "gpt-5.1-codex-mini",
-        "gpt-5.1-codex-max",
-    ],
+    "openai-codex": list(DEFAULT_CODEX_MODELS),
     "copilot-acp": [
         "copilot-acp",
     ],
